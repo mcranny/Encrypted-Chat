@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat App</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta name="referrer" content="no-referrer">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Login Container -->
+        <div id="login-container">
+            <h2>Chat App</h2>
+            <div class="input-group">
+                <input type="text" id="username" placeholder="Enter username" maxlength="30">
+            </div>
+            <div class="input-group">
+                <button onclick="showRoomOptions()">Continue</button>
+            </div>
+        </div>
+
+        <!-- Room Options Container -->
+        <div id="room-container" class="hidden">
+            <h3>Choose an option</h3>
+            <div class="input-group">
+                <button onclick="showCreateRoom()">Create Room</button>
+                <button onclick="showJoinRoom()" class="secondary">Join Room</button>
+            </div>
+        </div>
+
+        <!-- Create Room Container -->
+        <div id="create-room" class="hidden">
+            <h3>Create Room</h3>
+            <div class="input-group">
+                <input type="text" id="new-room" placeholder="Room name" maxlength="50">
+            </div>
+            <div class="input-group">
+                <input type="password" id="new-password" placeholder="Room password" maxlength="50">
+            </div>
+            <div class="input-group">
+                <button onclick="createRoom()">Create</button>
+                <button onclick="backToOptions()" class="secondary">Back</button>
+            </div>
+        </div>
+
+        <!-- Join Room Container -->
+        <div id="join-room" class="hidden">
+            <h3>Join Room</h3>
+            <div class="input-group">
+                <input type="text" id="room-name" placeholder="Room name" maxlength="50">
+            </div>
+            <div class="input-group">
+                <input type="password" id="room-password" placeholder="Room password" maxlength="50">
+            </div>
+            <div class="input-group">
+                <button onclick="joinRoom()">Join</button>
+                <button onclick="backToOptions()" class="secondary">Back</button>
+            </div>
+        </div>
+
+        <!-- Chat Container -->
+        <div id="chat-container" class="hidden">
+            <h3 id="room-header"></h3>
+            <div id="messages"></div>
+            <div id="message-input" class="input-group">
+                <input type="text" id="message" placeholder="Type your message..." maxlength="500">
+                <button onclick="sendMessage()">Send</button>
+                <button onclick="leaveRoom()" class="secondary">Leave</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        class Chat {
+            constructor() {
+                this.socket = io();
+                this.currentRoom = '';
+                this.username = '';
+                this.setupSocketHandlers();
+            }
+
+            setupSocketHandlers() {
+                this.socket.on('connect', () => {
+                    console.log('Connected to server');
+                });
+
+                this.socket.on('room_created', (data) => {
+                    this.currentRoom = data.room;
+                    showElement('chat-container');
+                    document.getElementById('room-header').textContent = `Room: ${this.currentRoom}`;
+                    this.appendMessage(`Room created: ${this.currentRoom}`, 'system');
+                });
+
+                this.socket.on('user_joined', (data) => {
+                    this.currentRoom = data.room;
+                    showElement('chat-container');
+                    document.getElementById('room-header').textContent = `Room: ${this.currentRoom}`;
+
+                    // Only display recent messages if we're the one joining
+                    if (data.username === this.username && data.recent_messages) {
+                        // Clear existing messages first
+                        document.getElementById('messages').innerHTML = '';
+                        data.recent_messages.forEach(msg => {
+                            const messageType = msg.username === this.username ? 'own' : 'user';
+                            this.appendMessage(`${msg.username}: ${msg.content}`, messageType);
+                        });
+                    }
+
+                    this.appendMessage(`${data.username} joined`, 'system');
+                });
+
+                this.socket.on('user_left', (data) => {
+                    this.appendMessage(`${data.username} left`, 'system');
+                });
+
+                this.socket.on('message', (data) => {
+                    const messageType = data.username === this.username ? 'own' : 'user';
+                    this.appendMessage(`${data.username}: ${data.message}`, messageType);
+                });
+
+                this.socket.on('error', (data) => {
+                    alert(data.message);
+                });
+            }
+
+            setUsername(name) {
+                this.username = name;
+            }
+
+            createRoom(roomName, password) {
+                if (roomName && password) {
+                    this.socket.emit('create_room', { room: roomName, password: password });
+                } else {
+                    alert('Please fill in all fields');
+                }
+            }
+
+            joinRoom(roomName, password) {
+                if (roomName && password) {
+                    this.socket.emit('join_room', {
+                        room: roomName,
+                        password: password,
+                        username: this.username
+                    });
+                } else {
+                    alert('Please fill in all fields');
+                }
+            }
+
+            sendMessage(message) {
+                if (message.trim() !== '') {
+                    this.socket.emit('message', {
+                        room: this.currentRoom,
+                        username: this.username,
+                        message: message
+                    });
+                }
+            }
+
+            leaveRoom() {
+                if (this.currentRoom) {
+                    this.socket.emit('leave_room', {
+                        room: this.currentRoom,
+                        username: this.username
+                    });
+                    this.currentRoom = '';
+                    showElement('room-container');
+                }
+            }
+
+            appendMessage(message, type) {
+                const messageDiv = document.createElement('div');
+                messageDiv.textContent = message;
+                messageDiv.className = `message ${type}-message`;
+                document.getElementById('messages').appendChild(messageDiv);
+                document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+            }
+        }
+
+        // Initialize chat
+        const chat = new Chat();
+
+        // UI Helper Functions
+        function showElement(elementId) {
+            document.querySelectorAll('.container > div').forEach(div => {
+                div.classList.add('hidden');
+            });
+            document.getElementById(elementId).classList.remove('hidden');
+        }
+
+        function showRoomOptions() {
+            const username = document.getElementById('username').value;
+            if (username.trim() === '') {
+                alert('Please enter a username');
+                return;
+            }
+            chat.setUsername(username);
+            showElement('room-container');
+        }
+
+        function showCreateRoom() {
+            showElement('create-room');
+        }
+
+        function showJoinRoom() {
+            showElement('join-room');
+        }
+
+        function backToOptions() {
+            showElement('room-container');
+        }
+
+        function createRoom() {
+            const roomName = document.getElementById('new-room').value;
+            const password = document.getElementById('new-password').value;
+            chat.createRoom(roomName, password);
+        }
+
+        function joinRoom() {
+            const roomName = document.getElementById('room-name').value;
+            const password = document.getElementById('room-password').value;
+            chat.joinRoom(roomName, password);
+        }
+
+        function sendMessage() {
+            const messageInput = document.getElementById('message');
+            const message = messageInput.value;
+            if (message.trim() !== '') {
+                chat.sendMessage(message);
+                messageInput.value = '';
+            }
+        }
+
+        function leaveRoom() {
+            chat.leaveRoom();
+        }
+
+        // Event Listeners
+        document.getElementById('message').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            chat.leaveRoom();
+        });
+    </script>
+</body>
+
+</html>
